@@ -1,0 +1,24 @@
+# 3DGazeNet + ZED 연동에 필요한 "추가" 의존성.
+#
+# torch / torchvision / opencv-python / numpy / onnxruntime 은 시스템 Python(RTX 5090용
+# torch cu130)을 그대로 재사용한다 (.venv를 --system-site-packages로 생성). 따라서 여기엔
+# 그 위에 더 깔아야 하는 것만 적는다.
+#
+# 설치:  .venv/Scripts/python.exe -m pip install -r requirements-extra.txt
+
+insightface        # 얼굴 검출 (buffalo_l / SCRFD). 최초 실행 시 모델 자동 다운로드
+gdown              # Google Drive 가중치 다운로드용
+easydict           # 3DGazeNet config
+matplotlib         # 3DGazeNet utils import (시각화 보조)
+tqdm
+PyYAML
+prettytable
+coloredlogs
+
+# (선택) 얼굴 검출을 GPU로 가속하려면 — 단, 시스템의 onnxruntime(CPU)와 충돌할 수 있으니
+# 별도 검토 후 설치:
+#   onnxruntime-gpu
+
+# (선택) vlm_gaze.py (3DGazeNet vs Gemini VLM 비교)용. GEMINI_API_KEY 환경변수 필요.
+#   google-genai
+#   pillow

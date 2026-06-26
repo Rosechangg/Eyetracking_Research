@@ -34,7 +34,8 @@
 |------|----------|------|------|
 | **3DGazeNet** (ECCV 2024) | appearance 기반 CNN — 3D 시선 방향 + 모니터 9~25점 보정(ridge, λ 자동선택, 이상치 제거) → 화면 응시점 | ✅ 구현·실험 | [3DGazeNet_Test/](3DGazeNet_Test/) |
 | **VLM** (Gemini / Qwen2.5-VL) | 비전-언어 모델로 "모니터 어느 칸을 보는가" 자연어 추정, 수치 방법과 비교 | 🧪 비교 데모 | [3DGazeNet_Test/](3DGazeNet_Test/) (`vlm_gaze.py` / `gaze_compare.py`) |
-| **파운데이션 / depth 기하** | 시선 파운데이션 모델, ZED depth 기반 ray-cast(머리 움직임 강건) | 🔜 예정 | (추가 시 각자 폴더) |
+| **DINOv2** (파운데이션 백본) | 자기지도 파운데이션 백본 **미세조정** → 3D 시선 + 16점 ridge 보정 → 화면 응시점. frozen 24° → fine-tune **14.6°** | ✅ 구현·실험 | [DINOv2_Gaze/](DINOv2_Gaze/) |
+| **depth 기하** | ZED depth 기반 ray-cast(머리 움직임 강건) | 🔜 예정 | (추가 시 각자 폴더) |
 
 > 새 방법은 각자 하위 폴더에 같은 평가 틀(아래)로 추가해 나간다.
 
@@ -52,7 +53,9 @@
 
 - **[3DGazeNet_Test/](3DGazeNet_Test/)** — 3DGazeNet 연동 + 모니터 보정/화면 응시점 시각화·녹화 + VLM 비교.
   설치·사용법·출처는 폴더 내 [README](3DGazeNet_Test/README.md) / [SOURCE](3DGazeNet_Test/SOURCE.md) 참고.
-- *(예정)* 추가 방법(파운데이션/depth 등)은 별도 폴더로.
+- **[DINOv2_Gaze/](DINOv2_Gaze/)** — DINOv2 파운데이션 백본 **미세조정** 시선 추정 + 화면 보정.
+  알고리즘 구조·실험 경로·3DGazeNet 비교는 [ALGORITHM.md](DINOv2_Gaze/ALGORITHM.md), 출처는 [SOURCE.md](DINOv2_Gaze/SOURCE.md).
+- *(예정)* depth 기반 등은 별도 폴더로.
 
 ---
 

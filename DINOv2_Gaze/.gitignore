@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+*.pt
+*.pth
+*.onnx
+index.csv
+gaze360_subset/
+recordings/
+*.jpg
+*.png
+*.mp4
+*.tsv

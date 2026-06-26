@@ -1,10 +1,63 @@
 # Eyetracking_Research
 
-시선 추정(eye tracking) 연구·실험 모음.
+다양한 **시선 추정(gaze estimation) 알고리즘을 하나의 파이프라인에서 비교·탐색**하여,
+내 응용 도메인에 가장 적합한 방법을 데이터로 찾는 연구 저장소.
 
-## 실험
+단일 모델에 의존하지 않고 **appearance 기반 딥러닝 · VLM/파운데이션 모델 · (예정) depth 기반 기하**
+등 서로 다른 패러다임을 같은 입력(ZED 스테레오 카메라)에서 돌려 정확도·강건성·보정 부담·연산량을
+비교한다. 목표는 *"내 도메인에서 무엇이 최적인가"* 를 추측이 아니라 측정으로 정하는 것.
 
-- **[3DGazeNet_Test/](3DGazeNet_Test/)** — [eververas/3DGazeNet](https://github.com/eververas/3DGazeNet)(ECCV 2024)을
-  ZED 카메라와 연동: 실시간 3D 시선 추정 + 모니터 캘리브레이션으로 화면 응시점 시각화·녹화,
-  그리고 Gemini VLM과의 비교. 출처·설치·사용법은 폴더 내 [README](3DGazeNet_Test/README.md) /
-  [SOURCE](3DGazeNet_Test/SOURCE.md) 참고.
+---
+
+## 왜 여러 방법을 다루나
+
+시선 추정은 방법마다 트레이드오프가 크다:
+
+- **appearance 기반(CNN)** — 단안 RGB로 정밀하지만 머리 움직임·수직 시선에 약하고 사람별 보정 필요
+- **VLM/파운데이션 모델** — 보정 없이 의미 수준(어디를 보는지)의 추정이 가능하나 정밀도·지연 한계
+- **depth 기반 기하(ray-cast)** — 머리 움직임에 강건하나 카메라↔모니터 기하 보정 필요
+
+→ 도메인 요구(정확도 vs 강건성 vs 실시간성 vs 보정 편의)에 맞춰 **선택·조합**하기 위해 직접 벤치마크한다.
+
+---
+
+## 공통 입력: ZED 스테레오 카메라
+
+모든 방법은 같은 ZED 카메라 프런트엔드를 공유한다(`zed_camera.py`). ZED를 OpenCV USB 스테레오로
+받아 **왼쪽 눈 RGB만** 사용하므로 ZED SDK가 없어도 동작한다. depth 기반 방법은 향후 ZED depth도 활용.
+
+---
+
+## 다루는(다룰) 방법
+
+| 방법 | 패러다임 | 상태 | 위치 |
+|------|----------|------|------|
+| **3DGazeNet** (ECCV 2024) | appearance 기반 CNN — 3D 시선 방향 + 모니터 9~25점 보정(ridge, λ 자동선택, 이상치 제거) → 화면 응시점 | ✅ 구현·실험 | [3DGazeNet_Test/](3DGazeNet_Test/) |
+| **VLM** (Gemini / Qwen2.5-VL) | 비전-언어 모델로 "모니터 어느 칸을 보는가" 자연어 추정, 수치 방법과 비교 | 🧪 비교 데모 | [3DGazeNet_Test/](3DGazeNet_Test/) (`vlm_gaze.py` / `gaze_compare.py`) |
+| **파운데이션 / depth 기하** | 시선 파운데이션 모델, ZED depth 기반 ray-cast(머리 움직임 강건) | 🔜 예정 | (추가 시 각자 폴더) |
+
+> 새 방법은 각자 하위 폴더에 같은 평가 틀(아래)로 추가해 나간다.
+
+---
+
+## 평가 관점(공통 지표)
+
+- **정확도** — 모니터 응시점 오차(px·도), Leave-One-Out CV
+- **강건성** — 머리 움직임, 조명 변화, 수직(상하) 시선
+- **비용** — 보정 부담(점 수/시간), 실시간 FPS, GPU 메모리
+
+---
+
+## 구조
+
+- **[3DGazeNet_Test/](3DGazeNet_Test/)** — 3DGazeNet 연동 + 모니터 보정/화면 응시점 시각화·녹화 + VLM 비교.
+  설치·사용법·출처는 폴더 내 [README](3DGazeNet_Test/README.md) / [SOURCE](3DGazeNet_Test/SOURCE.md) 참고.
+- *(예정)* 추가 방법(파운데이션/depth 등)은 별도 폴더로.
+
+---
+
+## 출처·라이선스
+
+각 방법이 쓰는 외부 코드의 출처·라이선스는 해당 폴더의 `SOURCE.md`에 명시한다.
+예: 3DGazeNet은 원본 라이선스가 없으므로 **원본 코드/가중치를 재배포하지 않고** 설치 스크립트로만
+연결한다(개인 연구용). 외부 모델/VLM 사용 시 각 제공자의 약관을 따른다.

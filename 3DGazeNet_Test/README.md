@@ -1,5 +1,9 @@
 # 3DGazeNet_Test — ZED 카메라 + 3DGazeNet 시선 추정
 
+> 이 폴더는 [Eyetracking_Research](../README.md)에서 비교·탐색하는 여러 시선 추정 방법 중
+> **appearance 기반(3DGazeNet)** 접근입니다. 전체 연구 목표(여러 알고리즘 벤치마크로 도메인 최적화)는
+> 루트 [README](../README.md) 참고.
+
 [eververas/3DGazeNet](https://github.com/eververas/3DGazeNet) (ECCV 2024)을 **ZED 카메라**와 연동해
 실시간으로 3D 시선(gaze)을 추정하고, 모니터 캘리브레이션으로 **화면 응시점(Point-of-Regard)** 까지
 시각화·녹화한다.

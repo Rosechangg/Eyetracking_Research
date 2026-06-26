@@ -24,9 +24,9 @@
 머리를 (대략) 고정한 상태가 가장 정확하다. 머리 이동 보정을 넣었지만 큰 자세 변화는
 여전히 한계가 있으니, 정확도가 나빠지면 'r'로 재보정.
 
-사용:
-    .venv/Scripts/python.exe screen_gaze.py                 # 보정 후 라이브 검증
-    .venv/Scripts/python.exe screen_gaze.py --load           # 저장된 보정 불러와 바로 검증
+사용 (기본 = 실행할 때마다 항상 처음부터 새로 보정. --load 줄 때만 저장 보정 재사용):
+    .venv/Scripts/python.exe screen_gaze.py                 # 항상 새 보정 후 라이브 검증(권장)
+    .venv/Scripts/python.exe screen_gaze.py --load           # (선택)저장 보정 재사용 — 머리 위치 같을 때만
     .venv/Scripts/python.exe screen_gaze.py --points 3       # 3x3=9 (기본). 5면 5x5=25
     .venv/Scripts/python.exe screen_gaze.py --log gaze_screen.tsv
 키: SPACE=타겟 캡처 / r=재보정 / g=타겟토글 / s=건너뛰기 / q·ESC=종료

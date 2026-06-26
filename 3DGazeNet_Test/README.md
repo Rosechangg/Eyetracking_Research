@@ -49,7 +49,9 @@ PY=.venv/Scripts/python.exe
 # 1) 실시간 시선 방향 + 녹화
 $PY run_zed_gaze.py --session
 
-# 2) 모니터 캘리브레이션 -> 화면 응시점 + 녹화 + 내 영상 PiP (메인)
+# 2) 모니터 캘리브레이션 -> 화면 응시점 (메인). 매번 처음부터 새로 보정(권장: 가장 정확)
+$PY screen_gaze.py --points 5
+#    + 녹화/내 영상 PiP까지 저장하려면 --session (단 FPS가 내려가 지터가 늘 수 있음)
 $PY screen_gaze.py --points 5 --session
 
 # 3) 동작 확인(이미지 1장 스모크 테스트)
@@ -62,7 +64,9 @@ $PY vlm_gaze.py --image 3DGazeNet/demo/data/test_images/img1.jpg
 ### screen_gaze.py (화면 응시점 + 녹화)
 - **보정**: 전체화면 타겟을 하나씩 응시하며 `SPACE`. 끝나면 시선→화면 좌표 **ridge 정규화 회귀** 적합
   (One-Euro 필터로 지터 억제, 머리이동 보정 특징, LOO-CV 정확도 출력). 점이 많을수록 정확(`--points 5`).
-- **키**: `SPACE`=캡처, `r`=재보정, `g`=타겟토글, `q`/`ESC`=종료.
+- **항상 새 보정이 기본**: 실행할 때마다 처음부터 보정한다. 저장된 보정은 `--load`를 명시할 때만
+  재사용하며, 머리 위치가 보정 때와 달라지면 어긋나므로 "안 맞으면" `--load` 없이 그냥 다시 보정하면 된다.
+- **키**: `SPACE`=캡처, `r`=재보정(언제든 처음부터), `g`=타겟토글, `q`/`ESC`=종료.
 - **녹화**: `--session` 이면 `recordings/session_<시각>/` 에 `screen.mp4`(시각화 + 내 영상 PiP 하단중앙) +
   `gaze.tsv` 저장. `q`/`ESC` 종료 시 마무리. 콘솔에 `[rec] ... 녹화됩니다 -> ...` 가 보이면 ON.
 - 주요 옵션: `--load`(보정 재사용), `--recalibrate`(강제 재보정), `--no-mirror`(PiP 거울 끄기),

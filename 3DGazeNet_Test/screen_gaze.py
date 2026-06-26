@@ -548,57 +548,19 @@ def ridge_fit(Fz, y, lam=1e-2):
     return w
 
 
-def fit_calibration(samples, W, H, lam):
-    """samples: list of dict(yaw,pitch,sx,sy,eye_center|None,iris_dist|None).
-    머리 특징(dxn,dyn) = 정규화된 눈중심 이동(기준 대비, 양안거리로 나눔)을 포함해 적합.
-    LOO CV 오차(px, deg)를 함께 계산해 반환.
+# lambda 자동 선택용 그리드(누설 없는 LOO 최소화로 선택)
+LAM_GRID = [3e-3, 1e-2, 3e-2, 1e-1, 3e-1, 1.0, 3.0, 10.0]
 
-    LOO 는 표준화까지 fold 안에서만 추정해 누설(leakage)을 없앤다: 각 fold 마다
-    학습 표본만으로 mu_i/sd_i 를 재계산하여 학습/테스트 점을 표준화하고 가중치를 적합.
-    이렇게 하면 hold-out 표본이 표준화 통계에 새지 않아 진짜 out-of-sample 추정이 된다."""
-    n = len(samples)
-    ys = np.array([s["yaw"] for s in samples], dtype=np.float64)
-    ps = np.array([s["pitch"] for s in samples], dtype=np.float64)
-    sx = np.array([s["sx"] for s in samples], dtype=np.float64)
-    sy = np.array([s["sy"] for s in samples], dtype=np.float64)
 
-    # 머리 기준: 눈중심/양안거리의 (있는 표본) 중앙값
-    ecs = [np.asarray(s["eye_center"], dtype=np.float64) for s in samples if s.get("eye_center") is not None]
-    dists = [float(s["iris_dist"]) for s in samples if s.get("iris_dist") is not None]
-    have_head = len(ecs) >= max(3, n // 2) and len(dists) >= max(3, n // 2)
-    if have_head:
-        ec_ref = np.median(np.asarray(ecs), axis=0)
-        d_ref = float(np.median(np.asarray(dists)))
-        d_ref = d_ref if d_ref > 1e-6 else 1.0
-    else:
-        ec_ref = None
-        d_ref = None
+def _loo_px(F, sx, sy, lam, n):
+    """누설(leakage) 없는 Leave-One-Out CV 오차를 계산한다.
 
-    def _head_feats(s):
-        if not have_head or s.get("eye_center") is None:
-            return 0.0, 0.0
-        ec = np.asarray(s["eye_center"], dtype=np.float64).ravel()[:2]
-        d = float(s["iris_dist"]) if s.get("iris_dist") is not None else d_ref
-        d = d if d and d > 1e-6 else d_ref
-        dxy = ec - ec_ref
-        return float(dxy[0] / d), float(dxy[1] / d)
+    각 fold 마다 학습 표본만으로 mu_i/sd_i 를 재추정해 학습/테스트 점을 표준화하고
+    가중치를 적합한다 -> hold-out 표본이 표준화 통계에 새지 않아 진짜 out-of-sample.
 
-    dxn = np.array([_head_feats(s)[0] for s in samples], dtype=np.float64)
-    dyn = np.array([_head_feats(s)[1] for s in samples], dtype=np.float64)
-
-    F = poly_feats(ys, ps, dxn, dyn)              # (n, 8)
-    mu, sd = _standardize_fit(F)                  # 최종 모델용(전체 표본) 표준화 통계
-    Fz = _apply_std(F, mu, sd)
-
-    wx = ridge_fit(Fz, sx, lam)
-    wy = ridge_fit(Fz, sy, lam)
-
-    pred = np.stack([Fz @ wx, Fz @ wy], axis=1)
-    tgt = np.stack([sx, sy], axis=1)
-    rms = float(np.sqrt(np.mean(np.sum((pred - tgt) ** 2, axis=1))))
-
-    # Leave-One-Out CV (표준화도 fold 내부에서만 추정 -> 누설 없는 out-of-sample)
-    loo_err = []
+    반환: (loo_px, per_point_resid(len n, 미계산 점은 nan), loo_x_px, loo_y_px)."""
+    resid = np.full(n, np.nan, dtype=np.float64)   # 점별 LOO 잔차(px). 축별 분해용으로 dx,dy 별도 보관.
+    dxs, dys = [], []
     if n >= 4:
         for i in range(n):
             mask = np.ones(n, dtype=bool)
@@ -612,10 +574,123 @@ def fit_calibration(samples, W, H, lam):
                 wyi = ridge_fit(Fz_tr, sy[mask], lam)
             except Exception:
                 continue
-            px = float(Fz_te @ wxi)
-            py = float(Fz_te @ wyi)
-            loo_err.append(np.hypot(px - sx[i], py - sy[i]))
-    loo_px = float(np.mean(loo_err)) if loo_err else rms
+            ex = float(Fz_te @ wxi) - sx[i]
+            ey = float(Fz_te @ wyi) - sy[i]
+            resid[i] = float(np.hypot(ex, ey))
+            dxs.append(abs(ex))
+            dys.append(abs(ey))
+    valid = resid[np.isfinite(resid)]
+    loo_px = float(np.mean(valid)) if valid.size else float("nan")
+    loo_x_px = float(np.mean(dxs)) if dxs else float("nan")
+    loo_y_px = float(np.mean(dys)) if dys else float("nan")
+    return loo_px, resid, loo_x_px, loo_y_px
+
+
+def fit_calibration(samples, W, H, lam=None):
+    """samples: list of dict(yaw,pitch,sx,sy,eye_center|None,iris_dist|None).
+    머리 특징(dxn,dyn) = 정규화된 눈중심 이동(기준 대비, 양안거리로 나눔)을 포함해 적합.
+    LOO CV 오차(px, deg)를 함께 계산해 반환.
+
+    lam: 숫자면 그 값 고정(back-compat). None 또는 음수면 'auto' -> LAM_GRID 위에서
+    누설 없는 LOO(loo_px)를 최소화하는 lam 을 자동 선택한다.
+
+    또한 best lam 의 점별 LOO 잔차로 이상치(MAD 3시그마) 보정점을 제거한 뒤
+    남은 점으로 재적합한다(안전장치: 최소 표본/최대 제거 비율 제한)."""
+    auto = (lam is None) or (isinstance(lam, (int, float)) and lam < 0)
+
+    def _build(samples_in):
+        """표본 리스트 -> (F, sx, sy, head 메타). 머리 기준/특징을 표본 내에서 추정."""
+        n = len(samples_in)
+        ys = np.array([s["yaw"] for s in samples_in], dtype=np.float64)
+        ps = np.array([s["pitch"] for s in samples_in], dtype=np.float64)
+        sx = np.array([s["sx"] for s in samples_in], dtype=np.float64)
+        sy = np.array([s["sy"] for s in samples_in], dtype=np.float64)
+
+        # 머리 기준: 눈중심/양안거리의 (있는 표본) 중앙값
+        ecs = [np.asarray(s["eye_center"], dtype=np.float64) for s in samples_in if s.get("eye_center") is not None]
+        dists = [float(s["iris_dist"]) for s in samples_in if s.get("iris_dist") is not None]
+        have_head = len(ecs) >= max(3, n // 2) and len(dists) >= max(3, n // 2)
+        if have_head:
+            ec_ref = np.median(np.asarray(ecs), axis=0)
+            d_ref = float(np.median(np.asarray(dists)))
+            d_ref = d_ref if d_ref > 1e-6 else 1.0
+        else:
+            ec_ref = None
+            d_ref = None
+
+        def _head_feats(s):
+            if not have_head or s.get("eye_center") is None:
+                return 0.0, 0.0
+            ec = np.asarray(s["eye_center"], dtype=np.float64).ravel()[:2]
+            d = float(s["iris_dist"]) if s.get("iris_dist") is not None else d_ref
+            d = d if d and d > 1e-6 else d_ref
+            dxy = ec - ec_ref
+            return float(dxy[0] / d), float(dxy[1] / d)
+
+        dxn = np.array([_head_feats(s)[0] for s in samples_in], dtype=np.float64)
+        dyn = np.array([_head_feats(s)[1] for s in samples_in], dtype=np.float64)
+        F = poly_feats(ys, ps, dxn, dyn)              # (n, 8)
+        return F, ys, ps, sx, sy, have_head, ec_ref, d_ref
+
+    def _select_lam(F, sx, sy, n):
+        """auto 면 LAM_GRID 위에서 loo_px 최소 lam 선택, 고정이면 그대로."""
+        if not auto:
+            lam_sel = float(lam)
+            lp, resid, lx, ly = _loo_px(F, sx, sy, lam_sel, n)
+            return lam_sel, lp, resid, lx, ly
+        best = None
+        for cand in LAM_GRID:
+            lp, resid, lx, ly = _loo_px(F, sx, sy, cand, n)
+            score = lp if np.isfinite(lp) else float("inf")
+            if best is None or score < best[0]:
+                best = (score, cand, lp, resid, lx, ly)
+        # 표본이 너무 적어 LOO 미계산(전부 nan)이면 그리드 중간값으로 폴백.
+        if best is None or not np.isfinite(best[0]):
+            lam_sel = 1e-2
+            lp, resid, lx, ly = _loo_px(F, sx, sy, lam_sel, n)
+            return lam_sel, lp, resid, lx, ly
+        return best[1], best[2], best[3], best[4], best[5]
+
+    # 1차: 전체 표본으로 lambda 선택 + 점별 LOO 잔차 확보
+    F, ys, ps, sx, sy, have_head, ec_ref, d_ref = _build(samples)
+    n = len(samples)
+    lam_sel, loo_px, resid, loo_x_px, loo_y_px = _select_lam(F, sx, sy, n)
+
+    # 2차: 이상치 보정점 제거(MAD 3시그마). 안전장치로 남은 점/제거 비율 제한.
+    #  제거 후에는 best lam 을 그대로 재사용하지 않고 lambda 를 다시 선택한다(점 분포 변화 반영).
+    n_dropped = 0
+    dropped_idx = []
+    kept_samples = list(samples)
+    valid = resid[np.isfinite(resid)]
+    if valid.size >= 4:
+        med = float(np.median(valid))
+        mad = float(np.median(np.abs(valid - med)))
+        thr = med + 3.0 * 1.4826 * mad
+        if mad > 1e-9:
+            bad = [i for i in range(n) if np.isfinite(resid[i]) and resid[i] > thr]
+            n_keep = n - len(bad)
+            min_keep = max(9, int(np.ceil(0.7 * n)))
+            if bad and n_keep >= min_keep and len(bad) <= int(np.floor(0.25 * n)):
+                dropped_idx = sorted(bad)
+                n_dropped = len(dropped_idx)
+                kept_samples = [s for i, s in enumerate(samples) if i not in set(dropped_idx)]
+                # 남은 점으로 재구성 후 lambda 재선택 + LOO 재계산
+                F, ys, ps, sx, sy, have_head, ec_ref, d_ref = _build(kept_samples)
+                n = len(kept_samples)
+                lam_sel, loo_px, resid, loo_x_px, loo_y_px = _select_lam(F, sx, sy, n)
+
+    # 최종 모델: (남은) 전체 표본으로 표준화 + 적합
+    mu, sd = _standardize_fit(F)                  # 최종 모델용(전체 표본) 표준화 통계
+    Fz = _apply_std(F, mu, sd)
+    wx = ridge_fit(Fz, sx, lam_sel)
+    wy = ridge_fit(Fz, sy, lam_sel)
+
+    pred = np.stack([Fz @ wx, Fz @ wy], axis=1)
+    tgt = np.stack([sx, sy], axis=1)
+    rms = float(np.sqrt(np.mean(np.sum((pred - tgt) ** 2, axis=1))))
+
+    if not np.isfinite(loo_px):
+        loo_px = rms
 
     # px -> deg 환산: 보정 표본의 yaw/pitch 각도 변화량 대비 화면 픽셀 변화량으로 스케일 추정
     span_ang = np.hypot(np.ptp(ys), np.ptp(ps))          # 라디안 대각 범위
@@ -626,10 +701,26 @@ def fit_calibration(samples, W, H, lam):
     else:
         loo_deg = float("nan")
 
+    # 신호 범위 진단(deg): yaw/pitch 가 실제로 얼마나 변했는지(수직 신호 약함 탐지용)
+    yaw_range_deg = float(np.ptp(ys) * 180.0 / np.pi)
+    pitch_range_deg = float(np.ptp(ps) * 180.0 / np.pi)
+
+    # 사후 진단용 원시 표본(KEPT) 저장. numpy 타입 제거하여 JSON 직렬화 보장.
+    samples_json = []
+    for s in kept_samples:
+        ec = s.get("eye_center")
+        idist = s.get("iris_dist")
+        samples_json.append({
+            "yaw": float(s["yaw"]), "pitch": float(s["pitch"]),
+            "sx": float(s["sx"]), "sy": float(s["sy"]),
+            "eye_center": ([float(v) for v in np.asarray(ec).ravel()[:2]] if ec is not None else None),
+            "iris_dist": (float(idist) if idist is not None else None),
+        })
+
     calib = {
         "version": CALIB_VERSION,
         "W": int(W), "H": int(H),
-        "lam": float(lam),
+        "lam": float(lam_sel),
         "wx": wx.tolist(), "wy": wy.tolist(),
         "mu": mu.tolist(), "sd": sd.tolist(),
         "have_head": bool(have_head),
@@ -638,7 +729,15 @@ def fit_calibration(samples, W, H, lam):
         "rms_px": rms,
         "loo_px": loo_px,
         "loo_deg": loo_deg,
+        "loo_x_px": loo_x_px,
+        "loo_y_px": loo_y_px,
+        "yaw_range_deg": yaw_range_deg,
+        "pitch_range_deg": pitch_range_deg,
+        "lam_selected": float(lam_sel),
+        "n_dropped": int(n_dropped),
+        "dropped_idx": [int(i) for i in dropped_idx],
         "n": n,
+        "samples": samples_json,
         "created": datetime.now().isoformat(timespec="seconds"),
     }
     return calib
@@ -731,9 +830,25 @@ def calibrate(cam, stream, W, H, n, lam,
     calib["targets"] = [list(t) for t in targets]
     diag = np.hypot(W, H)
     deg_str = (f"{calib['loo_deg']:.2f}deg" if np.isfinite(calib["loo_deg"]) else "deg N/A")
-    print(f"[calib] 완료. 표본 {len(samples)}, head보정={'ON' if calib['have_head'] else 'OFF'}")
-    print(f"[calib] 학습 RMS {calib['rms_px']:.1f}px | LOO-CV {calib['loo_px']:.1f}px "
-          f"({100 * calib['loo_px'] / diag:.1f}% of diag) | {deg_str}")
+    n_kept = calib.get("n", len(samples))
+    nd = calib.get("n_dropped", 0)
+    drop_str = (f" (이상치 {nd}개 제거 -> {n_kept})" if nd else "")
+    print(f"[calib] 완료. 표본 {len(samples)}{drop_str}, "
+          f"head보정={'ON' if calib['have_head'] else 'OFF'}")
+    print(f"[calib] lambda={calib['lam_selected']:.3g} | 학습 RMS {calib['rms_px']:.1f}px "
+          f"| LOO-CV {calib['loo_px']:.1f}px ({100 * calib['loo_px'] / diag:.1f}% of diag) | {deg_str}")
+    lx = calib.get("loo_x_px", float("nan"))
+    ly = calib.get("loo_y_px", float("nan"))
+    print(f"[calib] LOO 축별: x {lx:.1f}px / y {ly:.1f}px | "
+          f"신호범위 yaw {calib['yaw_range_deg']:.1f}deg / pitch {calib['pitch_range_deg']:.1f}deg")
+    # 휴리스틱 경고: 수직 신호 약함 / 정확도 불량(머리 움직임 의심)
+    pr = calib.get("pitch_range_deg", 0.0)
+    yr = calib.get("yaw_range_deg", 0.0)
+    if pr < 4.0 or pr < 0.5 * yr:
+        print("[calib] 경고: 수직(상하) 시선 신호가 약함 -> 카메라 위치/머리각도 조정 권장.")
+    if np.isfinite(calib["loo_deg"]) and calib["loo_deg"] > 5.0:
+        print("[calib] 경고: 정확도 불량(LOO > 5deg). 캡처 중 머리가 움직였을 가능성 -> "
+              "머리를 고정하고 재보정 권장.")
     return calib
 
 
@@ -886,8 +1001,9 @@ def main():
                     help="One-Euro min_cutoff (작을수록 더 부드럽고 더 지연)")
     ap.add_argument("--filter-beta", type=float, default=0.007,
                     help="One-Euro beta (클수록 빠른 움직임을 더 따라감)")
-    ap.add_argument("--ridge-lam", type=float, default=1e-2,
-                    help="릿지 회귀 정규화 강도")
+    ap.add_argument("--ridge-lam", type=float, default=-1.0,
+                    help="릿지 회귀 정규화 강도(기본 -1=auto: LOO 최소화로 자동 선택. "
+                         "양수 지정 시 그 값 고정)")
     ap.add_argument("--buf-len", type=int, default=6,
                     help="원시 gaze 시간 집계 링버퍼 길이")
     ap.add_argument("--angle-ema", type=float, default=0.35,
